@@ -263,6 +263,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  /// @note 距离向的分块数
   if (argc > 11) {
     if (strcmp(argv[11], "-") != 0) {
       sscanf(argv[11], "%d", &npat_r);
@@ -273,6 +274,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  /// @note 方位向的分块数
   if (argc > 12) {
     if (strcmp(argv[12], "-") != 0) {
       sscanf(argv[12], "%d", &npat_az);
@@ -283,6 +285,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  /// @note 重叠区域的像素数
   if (argc > 13) {
     if (strcmp(argv[13], "-") != 0) {
       sscanf(argv[13], "%d", &ovrlp);
@@ -293,7 +296,10 @@ int main(int argc, char **argv) {
     }
   }
 
+  /// @note 下面两个if的意义: 根据分块数和重叠像素, 计算每次需要读取的块的尺寸(nr, naz)
+
   if (npat_r == 0) {
+    /// @note 距离向分块数为0, 即argc[11]=='-'时, 如果overlp > PATCH_R_SIZE(1024)会报错
     if (ovrlp > PATCH_R_SIZE) {
       fprintf(stderr, "\nERROR: enter patch overlap that is smaller than than the range patch width: %d\n\n", PATCH_R_SIZE);
       exit(-1);
@@ -322,6 +328,8 @@ int main(int argc, char **argv) {
   ovrlp2 = ovrlp / 2;
   ovrlp4 = ovrlp / 4;
 
+  /// @note 默认的起始解缠位置是左上角点
+  
   rinit = roff;
   if (argc > 14) {
     if (strcmp(argv[14], "-") != 0) {
@@ -360,6 +368,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  /// @note 如果使用了掩膜文件, 打开掩膜文件mt1, 并以FILE类型存储到mskf, 等待数据读取
   if (mflg == 1) {			/* open Sun raster or BMP format mask file */
     strcpy(mt1, argv[3]);
     if (strstr(mt1, ras_ext) != NULL)im_flag1 = SUN;
@@ -383,8 +392,12 @@ int main(int argc, char **argv) {
     }
   }
 
+  /// @note 申请后续数据处理时所需的内存, 如果申请失败(a==NULL)则报错退出
+
   ftmp = (float *)malloc(width * sizeof(float));
   uctmp = (unsigned char *)malloc(width + 3);
+
+  /// @note a是a1的二维指针, 同理 wgt是wgt1的二维指针, m1时msk1的二维指针, ...
 
   a1 = (float *)malloc(nr * naz * sizeof(float));			/* allocate memory and initialize arrays */
   a =  (float **)malloc(sizeof(fcomplex *) * naz);
@@ -429,6 +442,8 @@ int main(int argc, char **argv) {
   printf("\nimage segment range offset:  %8d  azimuth offset: %8d\n", roff, azoff);
   printf("image segment range samples: %8d  azimuth lines:  %8d\n", nr, naz);
 
+  /// @note 如果没有输入权重文件, 则默认全为1
+
   if (wflg == 0) {			/* no weight file, set all weights to 1.0 */
     for (i = 0; i < naz; i++) {
       for (j = 0; j < nr; j++) wgt[i][j] = 1.0;
@@ -438,6 +453,8 @@ int main(int argc, char **argv) {
   roff1 = roff;
   azoff1 = azoff;
 
+  /// @note 把"第一"行干涉数据u3, 写到unwf里, 但是不知道有啥用
+
   if (azoff != 0) {				/* write blank lines if necessary */
     printf("writing %d blank lines at the beginning of the output file\n", azoff);
     for (j = 0; j < azoff; j++) {
@@ -445,6 +462,8 @@ int main(int argc, char **argv) {
     }
   }
 
+
+  /// @note line 466~650 对每个块做解缠操作 
   for (l = 0; l < npat_az; l++) {
     for (k = 0; k < npat_r; k++) {
       ip = l * npat_r + k;
@@ -452,6 +471,7 @@ int main(int argc, char **argv) {
       roff1 = roff + k * (nr - ovrlp);
       azoff1 = azoff + l * (naz - ovrlp);
 
+      /// @note 把干涉图文件intf里的信息 读到数组a里面
       naz_rd = rdp_cpx_phase(a, width, nls, roff1, azoff1, nr, naz, intf);
 
       printf("phase patch  (r,az): %5d  %5d   r_offset:%5d  az_offset:%5d  lines read:%5d\n", k + 1, l + 1, roff1, azoff1, naz_rd);
@@ -470,6 +490,7 @@ int main(int argc, char **argv) {
         printf("mask patch   (r,az): %5d  %5d   r_offset:%5d  az_offset:%5d  lines read:%5d\n", k + 1, l + 1, roff1, azoff1, naz_rd);
       }
 
+      /// @note mssptr 解缠的功能模块 使用a(缠绕相位), wgt(权重)和m1(掩膜文件)进行解缠, 得到解缠相位u1; 此外还用到了mflg和tmode两个参数
       zero_2d((void **)u1, nr, naz, sizeof(float));		/* initialize output unwrapped phase to 0.0 */
       mssptr(a, wgt, m1, u1, naz, nr, mflg, tmode); 		/* phase unwrapping with MCF SSP */
       ph0 = 0.0;						/* default value for phase integration constant */
@@ -479,9 +500,12 @@ int main(int argc, char **argv) {
       * / 			/* debugging of determining of the phase unwrapping constant */
 #endif
 
+      /// @note ip==0, 是第一个分块, 所以直接拷贝, 不需要与其他块进行平差
       if (ip == 0)goto copy_patch;				/* for the first patch, do not adjust the phase */
 
       if ((l == 0) || (k != 0)) {				/* for the first row read adjacent patch */
+        /// @note 对于第一行的所有块, 使用这种平差方法
+
         roff2 = roff + (k - 1) * (nr - ovrlp);
         azoff2 = azoff1;
         printf("\nreading patch adjacent to current patch: %d  roff2: %d  azoff2: %d\n", ip, roff2, azoff2);
@@ -515,6 +539,9 @@ int main(int argc, char **argv) {
           }
         }
       } else {   							/* derive phase constant from unwrapped phase in the row above  */
+
+        /// @note 从第二行开始的所有块, 使用这种平差方法（并非第二行像素, 而是第二行块）
+
         roff2 = roff + k * (nr - ovrlp);
         azoff2 = azoff + (l - 1) * (naz - ovrlp);
 
@@ -584,6 +611,7 @@ int main(int argc, char **argv) {
       printf("selected 2PI ambiguity: %d   phase offset: %10.3f radians\n\n", mx_amb, ph0);
       free(hist);
 
+      /// @note 复制块的基本思路就是u1减去上一个块的值(ph0)赋给u3
 copy_patch:
       if (k == 0)j1 = 0;					/* first patch in the row uses all the range samples at the start */
       else j1 = ovrlp - ovrlp2;
@@ -606,13 +634,17 @@ copy_patch:
           }
         }
       }
-    }
+
+
+    }/// ! end of for(k=0; k < npat_r; k++)
 
     if (l == 0)nl1 = 0;					/* test for first row */
     else nl1 = ovrlp - ovrlp2;
 
     if (l == npat_az - 1)nl2 = azoff + naz1 - azoff1;	/* test for last row */
     else nl2 = naz - ovrlp2;
+
+    /// @note 每当结束一整行块的计算和填充, 就把它们写到unwf文件里去
 
     printf("unwrapped phase buffer row starting and ending line to copy: %d %d\n", nl1, nl2);
     fwrite((unsigned char *)&u3[nl1][0], sizeof(float), (nl2 - nl1)*width, unwf);
@@ -634,7 +666,7 @@ copy_patch:
       exit(-1);
     }
     fflush(unwf);
-  }
+  } ///! end of for(l=0;l<npat_az; l++)
 
   if (azoff + naz1 < nls) {
     nl1 = 0;
